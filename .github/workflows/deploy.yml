@@ -1,0 +1,131 @@
+name: Deploy to Ubuntu Server
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Run linter
+      run: npm run lint
+
+    - name: Build application
+      run: npm run build
+      env:
+        NODE_ENV: production
+
+    - name: Generate Prisma client
+      run: npx prisma generate
+
+    - name: Create deployment package
+      run: |
+        mkdir -p deploy
+        cp -r .next deploy/
+        cp -r public deploy/
+        cp -r prisma deploy/
+        cp package.json deploy/
+        cp package-lock.json deploy/
+        cp next.config.ts deploy/
+        cp tsconfig.json deploy/
+        cp server.ts deploy/
+        cp -r src deploy/
+        tar -czf deployment.tar.gz deploy/
+
+    - name: Deploy to server
+      uses: appleboy/scp-action@v1.0.0
+      with:
+        host: ${{ secrets.SERVER_HOST }}
+        username: ${{ secrets.SERVER_USER }}
+        key: ${{ secrets.SERVER_SSH_KEY }}
+        port: ${{ secrets.SERVER_PORT }}
+        source: "deployment.tar.gz"
+        target: "/tmp"
+
+    - name: Extract and deploy on server
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.SERVER_HOST }}
+        username: ${{ secrets.SERVER_USER }}
+        key: ${{ secrets.SERVER_SSH_KEY }}
+        port: ${{ secrets.SERVER_PORT }}
+        script: |
+          # Navigate to project directory
+          cd /var/www/ai-tutor
+          
+          # Create backup
+          if [ -d "current" ]; then
+            cp -r current backup-$(date +%Y%m%d-%H%M%S)
+          fi
+          
+          # Extract new deployment
+          cd /tmp
+          tar -xzf deployment.tar.gz
+          
+          # Remove old deployment
+          rm -rf /var/www/ai-tutor/current
+          
+          # Move new deployment
+          mv deploy /var/www/ai-tutor/current
+          
+          # Navigate to new deployment
+          cd /var/www/ai-tutor/current
+          
+          # Install dependencies
+          npm ci --production
+          
+          # Generate Prisma client
+          npx prisma generate
+          
+          # Run database migrations
+          npx prisma db push
+          
+          # Build the application
+          npm run build
+          
+          # Restart PM2 process
+          pm2 restart ai-tutor || pm2 start server.ts --name ai-tutor
+          
+          # Save PM2 process list
+          pm2 save
+          
+          # Cleanup
+          rm -f /tmp/deployment.tar.gz
+          rm -rf /tmp/deploy
+
+    - name: Health check
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.SERVER_HOST }}
+        username: ${{ secrets.SERVER_USER }}
+        key: ${{ secrets.SERVER_SSH_KEY }}
+        port: ${{ secrets.SERVER_PORT }}
+        script: |
+          # Wait for application to start
+          sleep 10
+          
+          # Check if application is running
+          if pm2 info ai-tutor | grep -q "online"; then
+            echo "✅ Application is running successfully"
+            exit 0
+          else
+            echo "❌ Application failed to start"
+            pm2 logs ai-tutor --lines 20
+            exit 1
+          fi
