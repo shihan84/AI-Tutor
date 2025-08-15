@@ -13,20 +13,327 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+// User roles
+enum UserRole {
+  STUDENT
+  TEACHER
+  PARENT
+  ADMIN
 }
 
-model Post {
+// Assignment types
+enum AssignmentType {
+  HOMEWORK
+  QUIZ
+  PROJECT
+  EXAM
+}
+
+// Grade levels for Indian education system
+enum GradeLevel {
+  PRIMARY_1
+  PRIMARY_2
+  PRIMARY_3
+  PRIMARY_4
+  PRIMARY_5
+  SECONDARY_6
+  SECONDARY_7
+  SECONDARY_8
+  SECONDARY_9
+  SECONDARY_10
+  HIGHER_SECONDARY_11
+  HIGHER_SECONDARY_12
+}
+
+// Subject categories for Indian syllabus
+enum SubjectCategory {
+  LANGUAGES
+  MATHEMATICS
+  SCIENCES
+  SOCIAL_SCIENCES
+  ARTS
+  PHYSICAL_EDUCATION
+  VOCATIONAL
+}
+
+// Progress status
+enum ProgressStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+  NEEDS_IMPROVEMENT
+}
+
+// Assignment submission status
+enum SubmissionStatus {
+  PENDING
+  SUBMITTED
+  GRADED
+  LATE
+}
+
+// User model for authentication and basic user information
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  password      String
+  name          String
+  role          UserRole
+  avatar        String?
+  dateOfBirth   DateTime?
+  phone         String?
+  address       String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  studentProfile  Student?
+  teacherProfile  Teacher?
+  parentProfile   Parent?
+  aiConversations AIConversation[]
+  studentSubmissions AssignmentSubmission[] @relation("SubmissionStudent")
+  teacherSubmissions AssignmentSubmission[] @relation("SubmissionTeacher")
+  studentProgressRecords ProgressRecord[]
+  studentReports Report[]
+  parentStudents Student[] @relation("StudentParent")
+  teacherStudents Student[] @relation("StudentTeacher")
+  enrollments Enrollment[]
+
+  @@map("users")
+}
+
+// Student profile with academic information
+model Student {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  gradeLevel      GradeLevel
+  enrollmentDate  DateTime @default(now())
+  parentId        String?
+  teacherId       String?
+
+  // Relations
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent          User?          @relation("StudentParent", fields: [parentId], references: [id])
+  teacher         User?          @relation("StudentTeacher", fields: [teacherId], references: [id])
+
+  @@map("students")
+}
+
+// Teacher profile with specialization
+model Teacher {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  specialization String?
+  experience  Int?     // Years of experience
+  qualification String?
+
+  // Relations
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subjects    SubjectTeacher[]
+  assignments Assignment[]
+  reports     Report[]
+
+  @@map("teachers")
+}
+
+// Parent profile
+model Parent {
+  id      String   @id @default(cuid())
+  userId  String   @unique
+  occupation String?
+
+  // Relations
+  user    User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("parents")
+}
+
+// Subject model for Indian syllabus
+model Subject {
+  id          String           @id @default(cuid())
+  name        String
+  code        String           @unique
+  category    SubjectCategory
+  description String?
+  gradeLevel  GradeLevel
+  isActive    Boolean          @default(true)
+
+  // Relations
+  topics      Topic[]
+  enrollments Enrollment[]
+  assignments Assignment[]
+  teachers    SubjectTeacher[]
+
+  @@map("subjects")
+}
+
+// Topic model for breaking down subjects into topics
+model Topic {
+  id          String   @id @default(cuid())
+  subjectId   String
+  name        String
+  description String?
+  order       Int
+  isActive    Boolean  @default(true)
+
+  // Relations
+  subject     Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  lessons     Lesson[]
+  progressRecords ProgressRecord[]
+
+  @@map("topics")
+}
+
+// Lesson model for individual lessons within topics
+model Lesson {
+  id          String   @id @default(cuid())
+  topicId     String
+  title       String
+  content     String
+  order       Int
+  isActive    Boolean  @default(true)
+
+  // Relations
+  topic       Topic    @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  @@map("lessons")
+}
+
+// Student enrollment in subjects
+model Enrollment {
+  id          String   @id @default(cuid())
+  studentId   String
+  subjectId   String
+  enrolledAt  DateTime @default(now())
+  completedAt DateTime?
+
+  // Relations
+  student     User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  subject     Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, subjectId])
+  @@map("enrollments")
+}
+
+// Assignment model
+model Assignment {
+  id            String           @id @default(cuid())
+  teacherId     String
+  subjectId     String
+  title         String
+  description   String
+  type          AssignmentType
+  totalPoints   Int
+  dueDate       DateTime
+  isActive      Boolean          @default(true)
+  createdAt     DateTime         @default(now())
+
+  // Relations
+  teacher       Teacher          @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  subject       Subject          @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  submissions   AssignmentSubmission[]
+
+  @@map("assignments")
+}
+
+// Assignment submission model
+model AssignmentSubmission {
+  id              String            @id @default(cuid())
+  assignmentId    String
+  studentId       String
+  submissionDate  DateTime          @default(now())
+  content         String?
+  fileUrl         String?
+  score           Float?
+  feedback        String?
+  status          SubmissionStatus  @default(PENDING)
+  gradedAt        DateTime?
+  gradedBy        String?
+
+  // Relations
+  assignment      Assignment        @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  student         User             @relation("SubmissionStudent", fields: [studentId], references: [id])
+  teacher         User?             @relation("SubmissionTeacher", fields: [gradedBy], references: [id])
+
+  @@unique([assignmentId, studentId])
+  @@map("assignment_submissions")
+}
+
+// Progress tracking model
+model ProgressRecord {
+  id          String          @id @default(cuid())
+  studentId   String
+  topicId     String
+  status      ProgressStatus  @default(NOT_STARTED)
+  progress    Float           @default(0) // 0-100 percentage
+  timeSpent   Int             @default(0) // in minutes
+  lastAccess  DateTime        @default(now())
+  notes       String?
+
+  // Relations
+  student     User            @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  topic       Topic           @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, topicId])
+  @@map("progress_records")
+}
+
+// AI conversation model
+model AIConversation {
   id        String   @id @default(cuid())
-  title     String
-  content   String?
-  published Boolean  @default(false)
-  authorId  String
+  userId    String
+  title     String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // Relations
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages  AIMessage[]
+
+  @@map("ai_conversations")
+}
+
+// AI message model
+model AIMessage {
+  id             String   @id @default(cuid())
+  conversationId String
+  role           String   // 'user' or 'assistant'
+  content        String
+  createdAt      DateTime @default(now())
+
+  // Relations
+  conversation   AIConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@map("ai_messages")
+}
+
+// Report model for student progress reports
+model Report {
+  id          String   @id @default(cuid())
+  studentId   String
+  teacherId   String?
+  title       String
+  content     String
+  reportType  String   // 'progress', 'assignment', 'term', etc.
+  generatedAt DateTime @default(now())
+
+  // Relations
+  student     User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  teacher     Teacher? @relation(fields: [teacherId], references: [id])
+
+  @@map("reports")
+}
+
+// Subject-Teacher relationship
+model SubjectTeacher {
+  id        String  @id @default(cuid())
+  subjectId String
+  teacherId String
+
+  // Relations
+  subject   Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  teacher   Teacher @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+
+  @@unique([subjectId, teacherId])
+  @@map("subject_teachers")
 }
